@@ -2,20 +2,26 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from theme import apply_modern_dark_theme
 from modern_widgets import RoundedButton
+from ai_tutor import ask_tutor
+from settings import load_settings
 from db import (
     get_topics, create_topic, update_topic, delete_topic,
     get_notes_by_topic, create_note, update_note, delete_note,
     init_db
 )
 
+
 class NotesApp:
     def __init__(self, root):
         self.root = root
         self.root.title("AI Notes Manager")
-        self.root.geometry("1200x750")
-        self.root.minsize(1100, 700)
+        self.root.geometry("1450x850")
+        self.root.minsize(1200, 700)
 
         self.colors = apply_modern_dark_theme(self.root)
+
+        self.typing_animation_running = False
+        self.typing_animation_job = None
 
         self.selected_topic_id = None
         self.selected_note_id = None
@@ -23,8 +29,9 @@ class NotesApp:
         self.build_layout()
         self.load_topics()
 
+
     # ============================================================
-    # UI LAYOUT
+    # BUILD LAYOUT
     # ============================================================
     def build_layout(self):
 
@@ -32,12 +39,10 @@ class NotesApp:
         self.sidebar = ttk.Frame(self.root, width=250, style="Sidebar.TFrame")
         self.sidebar.pack(side="left", fill="y")
 
-        ttk.Label(self.sidebar,
-                  text="Topics",
+        ttk.Label(self.sidebar, text="Topics",
                   font=("Segoe UI", 15, "bold"),
                   foreground=self.colors["accent"],
-                  background=self.colors["bg_sidebar"]
-                  ).pack(pady=15)
+                  background=self.colors["bg_sidebar"]).pack(pady=15)
 
         self.topic_list = tk.Listbox(
             self.sidebar,
@@ -47,34 +52,31 @@ class NotesApp:
             highlightthickness=0,
             relief="flat",
             bd=0,
-            font=("Segoe UI", 10)
+            font=("Segoe UI", 11)
         )
         self.topic_list.pack(fill="both", expand=True, padx=10)
         self.topic_list.bind("<<ListboxSelect>>", self.on_topic_select)
 
         RoundedButton(self.sidebar, text="Add Topic",
-                      bg_color=self.colors["accent"],
-                      fg_color="#1E1E2E",
+                      bg_color=self.colors["accent"], fg_color="#1E1E2E",
                       parent_bg=self.colors["bg_sidebar"],
                       command=self.add_topic).pack(pady=5)
 
         RoundedButton(self.sidebar, text="Edit Topic",
-                      bg_color=self.colors["accent"],
-                      fg_color="#1E1E2E",
+                      bg_color=self.colors["accent"], fg_color="#1E1E2E",
                       parent_bg=self.colors["bg_sidebar"],
                       command=self.edit_topic).pack(pady=5)
 
         RoundedButton(self.sidebar, text="Delete Topic",
-                      bg_color="#F38BA8",
-                      fg_color="#1E1E2E",
+                      bg_color="#F38BA8", fg_color="#1E1E2E",
                       parent_bg=self.colors["bg_sidebar"],
                       command=self.delete_topic_action).pack(pady=5)
 
-        # ------------------ MAIN PANEL ------------------
-        self.main = ttk.Frame(self.root, style="Main.TFrame")
-        self.main.pack(side="right", fill="both", expand=True)
 
-        # SEARCH BAR
+        # ------------------ NOTES PANEL ------------------
+        self.main = ttk.Frame(self.root, style="Main.TFrame")
+        self.main.pack(side="left", fill="both", expand=True)
+
         self.search_var = tk.StringVar()
         self.search_var.trace("w", lambda *args: self.filter_notes())
 
@@ -85,7 +87,6 @@ class NotesApp:
         self.search_entry = ttk.Entry(self.main, textvariable=self.search_var, width=50)
         self.search_entry.pack(anchor="w", padx=10, pady=2)
 
-        # NOTES LIST
         self.notes_list = tk.Listbox(
             self.main,
             bg=self.colors["bg_card"],
@@ -95,73 +96,250 @@ class NotesApp:
             relief="flat",
             bd=0,
             height=8,
-            font=("Segoe UI", 10)
+            font=("Segoe UI", 11)
         )
         self.notes_list.pack(fill="x", padx=10, pady=8)
         self.notes_list.bind("<<ListboxSelect>>", self.on_note_select)
 
-        # TITLE
-        ttk.Label(self.main, text="Title:", style="Header.TLabel").pack(
-            anchor="w", padx=10
-        )
+        ttk.Label(self.main, text="Title:", style="Header.TLabel").pack(anchor="w", padx=10)
 
-        self.note_title = ttk.Entry(self.main, width=50, font=("Segoe UI", 10))
+        self.note_title = ttk.Entry(self.main, width=50)
         self.note_title.pack(anchor="w", padx=10, pady=5)
 
-        # CONTENT
-        ttk.Label(self.main, text="Content:", style="Header.TLabel").pack(
-            anchor="w", padx=10, pady=(5, 0)
-        )
+        ttk.Label(self.main, text="Content:", style="Header.TLabel").pack(anchor="w", padx=10)
 
         self.note_content = tk.Text(
             self.main,
             bg=self.colors["bg_card"],
             fg=self.colors["fg_text"],
             insertbackground=self.colors["accent"],
+            wrap=tk.WORD,
             relief="flat",
             bd=2,
             highlightbackground=self.colors["border"],
             highlightcolor=self.colors["accent"],
-            wrap=tk.WORD,
-            font=("Segoe UI", 10)
+            font=("Segoe UI", 11)
         )
         self.note_content.pack(fill="both", expand=True, padx=10, pady=8)
 
-        # ------------------ BOTTOM BUTTONS ------------------
-        button_frame = ttk.Frame(self.main, style="Main.TFrame")
-        button_frame.pack(fill="x", pady=2)
+        bottom_buttons = ttk.Frame(self.main, style="Main.TFrame")
+        bottom_buttons.pack(fill="x", pady=2)
 
-        button_frame.columnconfigure(0, weight=1)
-        button_frame.columnconfigure(1, weight=1)
-        button_frame.columnconfigure(2, weight=1)
+        bottom_buttons.columnconfigure(0, weight=1)
+        bottom_buttons.columnconfigure(1, weight=1)
+        bottom_buttons.columnconfigure(2, weight=1)
 
-        RoundedButton(button_frame, text="Add Note",
-                      bg_color=self.colors["accent"],
-                      fg_color="#1E1E2E",
+        RoundedButton(bottom_buttons, text="Add Note",
+                      bg_color=self.colors["accent"], fg_color="#1E1E2E",
                       parent_bg=self.colors["bg_main"],
                       command=self.add_note).grid(row=0, column=0, padx=5, sticky="ew")
 
-        RoundedButton(button_frame, text="Save Changes",
-                      bg_color="#A6E3A1",
-                      fg_color="#1E1E2E",
+        RoundedButton(bottom_buttons, text="Save Changes",
+                      bg_color="#A6E3A1", fg_color="#1E1E2E",
                       parent_bg=self.colors["bg_main"],
                       command=self.save_note).grid(row=0, column=1, padx=5, sticky="ew")
 
-        RoundedButton(button_frame, text="Delete Note",
-                      bg_color="#F38BA8",
-                      fg_color="#1E1E2E",
+        RoundedButton(bottom_buttons, text="Delete Note",
+                      bg_color="#F38BA8", fg_color="#1E1E2E",
                       parent_bg=self.colors["bg_main"],
                       command=self.delete_note_action).grid(row=0, column=2, padx=5, sticky="ew")
 
+
+        # ============================================================
+        # AI TUTOR PANEL (with bubbles)
+        # ============================================================
+        self.tutor_frame = ttk.Frame(self.root, style="Main.TFrame")
+        self.tutor_frame.pack(side="right", fill="both", expand=True, padx=10, pady=10)
+
+
+        ttk.Label(self.tutor_frame, text="AI Tutor:", style="Header.TLabel").pack(anchor="w")
+
+        # Scrollable chat area
+        self.chat_container = tk.Canvas(
+            self.tutor_frame,
+            bg=self.colors["bg_card"],
+            highlightthickness=0
+        )
+        self.chat_container.pack(fill="both", expand=True, padx=5, pady=5)
+
+        self.chat_scroll = ttk.Scrollbar(self.tutor_frame, orient="vertical", command=self.chat_container.yview)
+        self.chat_scroll.pack(side="right", fill="y")
+
+        self.chat_container.configure(yscrollcommand=self.chat_scroll.set)
+
+        self.chat_frame = tk.Frame(self.chat_container, bg=self.colors["bg_card"])
+        self.chat_container.create_window((0, 0), window=self.chat_frame, anchor="nw")
+
+        self.chat_frame.bind("<Configure>", lambda e: 
+                             self.chat_container.configure(scrollregion=self.chat_container.bbox("all")))
+
+        # Input field + Send
+        self.tutor_input = ttk.Entry(self.tutor_frame, width=80)
+        self.tutor_input.pack(anchor="w", padx=5, pady=3)
+
+        self.tutor_input.bind("<Return>", self.ask_tutor_enter)
+
+        RoundedButton(self.tutor_frame, text="Ask Tutor",
+                      bg_color=self.colors["accent"], fg_color="#1E1E2E",
+                      parent_bg=self.colors["bg_main"],
+                      command=self.ask_tutor_action).pack(pady=5)
+
+
     # ============================================================
-    # TOPICS
+    # CHAT BUBBLE UTILITIES
+    # ============================================================
+    def add_bubble(self, text, sender="user"):
+    
+
+    # Outer frame that controls alignment
+        bubble_wrapper = tk.Frame(
+            self.chat_frame,
+            bg=self.colors["bg_card"]
+        )
+
+        # Bubble style
+        if sender == "user":
+            bubble_color = "#2e384d"
+            fg = self.colors["accent"]
+            anchor_side = "e"        # align RIGHT
+            padx = (150, 10)         # more space on left, bubble sticks right
+        else:
+            bubble_color = "#374152"
+            fg = "#A6E3A1"
+            anchor_side = "w"        # align LEFT
+            padx = (10, 150)         # more space on right, bubble sticks left
+
+        # The actual bubble
+        bubble = tk.Frame(
+            bubble_wrapper,
+            bg=bubble_color,
+            padx=12,
+            pady=8
+        )
+
+        tk.Label(
+            bubble,
+            text=text,
+            fg=fg,
+            bg=bubble_color,
+            justify="left",
+            wraplength=450,
+            font=("Segoe UI", 10)
+        ).pack()
+
+        bubble.pack()
+
+        # IMPORTANT: pack with correct side alignment
+        bubble_wrapper.pack(anchor=anchor_side, pady=4, padx=padx)
+
+        # scroll to bottom
+        self.chat_container.update_idletasks()
+        self.chat_container.yview_moveto(1.0)
+
+
+
+    # ============================================================
+    # TYPING ANIMATION
+    # ============================================================
+    def start_typing_animation(self):
+        self.typing_animation_running = True
+        self.typing_dots = 0
+
+        # create placeholder bubble
+        self.typing_bubble = tk.Label(
+            self.chat_frame,
+            text="🤖 Tutor is typing",
+            fg="#A6E3A1",
+            bg=self.colors["bg_card"],
+            font=("Segoe UI", 10),
+            anchor="w"
+        )
+        self.typing_bubble.pack(anchor="w", pady=3)
+
+        self.update_typing_animation()
+
+    def update_typing_animation(self):
+        if not self.typing_animation_running:
+            return
+
+        dots = "." * (self.typing_dots % 4)
+        self.typing_dots += 1
+
+        self.typing_bubble.config(text=f"🤖 Tutor is typing{dots}")
+
+        self.typing_animation_job = self.root.after(500, self.update_typing_animation)
+
+    def stop_typing_animation(self):
+        if self.typing_animation_job:
+            self.root.after_cancel(self.typing_animation_job)
+
+        if hasattr(self, "typing_bubble"):
+            self.typing_bubble.destroy()
+
+        self.typing_animation_running = False
+
+
+    # ============================================================
+    # ASK TUTOR
+    # ============================================================
+    def ask_tutor_action(self):
+        if not self.selected_topic_id:
+            messagebox.showerror("Error", "Select a topic first.")
+            return
+
+        question = self.tutor_input.get().strip()
+        if not question:
+            return
+
+        # display user bubble
+        self.add_bubble(f"👤 You:\n{question}", sender="user")
+
+        # start typing animation
+        self.start_typing_animation()
+
+        # get context
+        topic = next(t for t in self.topics if t["id"] == self.selected_topic_id)
+        note_titles = [n["title"] for n in self.notes]
+
+        selected_content = ""
+        if self.notes_list.curselection():
+            idx = self.notes_list.curselection()[0]
+            selected_content = self.notes[idx]["content"]
+
+        settings = load_settings()
+
+        # query AI
+        answer = ask_tutor(
+            topic_id=self.selected_topic_id,
+            topic_name=topic["name"],
+            topic_desc=topic["description"],
+            note_titles=note_titles,
+            selected_note_content=selected_content,
+            question=question,
+            settings=settings
+        )
+
+        # stop animation
+        self.stop_typing_animation()
+
+        # show answer bubble
+        self.add_bubble(f"🤖 Tutor:\n{answer}", sender="assistant")
+
+        self.tutor_input.delete(0, tk.END)
+
+    def ask_tutor_enter(self, event):
+        self.ask_tutor_action()
+        return "break"
+
+
+    # ============================================================
+    # TOPICS + NOTES LOGIC
     # ============================================================
     def load_topics(self):
         self.topic_list.delete(0, tk.END)
         self.topics = list(get_topics())
-
         for t in self.topics:
-            self.topic_list.insert(tk.END, t['name'])
+            self.topic_list.insert(tk.END, t["name"])
 
     def add_topic(self):
         name = simple_input("Add Topic", "Topic name:")
@@ -172,23 +350,21 @@ class NotesApp:
         self.load_topics()
 
     def edit_topic(self):
-        if self.selected_topic_id is None:
+        if not self.topic_list.curselection():
             return
-
-        topic = self.topics[self.topic_list.curselection()[0]]
-
+        idx = self.topic_list.curselection()[0]
+        topic = self.topics[idx]
         new_name = simple_input("Edit Topic", "New name:", topic["name"])
         new_desc = simple_input("Edit Topic", "New description:", topic["description"])
-
         update_topic(topic["id"], new_name, new_desc)
         self.load_topics()
 
     def delete_topic_action(self):
-        if self.selected_topic_id is None:
+        if not self.topic_list.curselection():
             return
-
         if messagebox.askyesno("Confirm", "Delete topic and all its notes?"):
-            delete_topic(self.selected_topic_id)
+            idx = self.topic_list.curselection()[0]
+            delete_topic(self.topics[idx]["id"])
             self.selected_topic_id = None
             self.load_topics()
             self.notes_list.delete(0, tk.END)
@@ -196,15 +372,10 @@ class NotesApp:
     def on_topic_select(self, event):
         if not self.topic_list.curselection():
             return
-
         idx = self.topic_list.curselection()[0]
         self.selected_topic_id = self.topics[idx]["id"]
-
         self.load_notes()
 
-    # ============================================================
-    # NOTES
-    # ============================================================
     def load_notes(self):
         self.notes = list(get_notes_by_topic(self.selected_topic_id))
         self.render_notes(self.notes)
@@ -222,52 +393,41 @@ class NotesApp:
     def on_note_select(self, event):
         if not self.notes_list.curselection():
             return
-
         idx = self.notes_list.curselection()[0]
         note = self.notes[idx]
-
         self.selected_note_id = note["id"]
-
         self.note_title.delete(0, tk.END)
         self.note_title.insert(0, note["title"])
-
         self.note_content.delete("1.0", tk.END)
         self.note_content.insert("1.0", note["content"])
 
     def add_note(self):
-        if self.selected_topic_id is None:
+        if not self.selected_topic_id:
             return
         create_note(self.selected_topic_id, "New Note", "")
         self.load_notes()
 
     def save_note(self):
-        if self.selected_note_id is None:
+        if not self.selected_note_id:
             return
-
         title = self.note_title.get()
         content = self.note_content.get("1.0", tk.END).strip()
-
         update_note(self.selected_note_id, title, content)
         self.load_notes()
 
     def delete_note_action(self):
-        if self.selected_note_id is None:
+        if not self.selected_note_id:
             return
-
         delete_note(self.selected_note_id)
-
         self.selected_note_id = None
         self.load_notes()
-
         self.note_title.delete(0, tk.END)
         self.note_content.delete("1.0", tk.END)
+
 
 # ============================================================
 # POPUP INPUT
 # ============================================================
-def simple_output(msg):
-    messagebox.showinfo("Info", msg)
-
 def simple_input(title, prompt, default=""):
     win = tk.Toplevel()
     win.title(title)
@@ -282,6 +442,7 @@ def simple_input(title, prompt, default=""):
     entry.pack(pady=5)
 
     val = {"value": None}
+
     def ok():
         val["value"] = entry.get()
         win.destroy()
@@ -290,6 +451,7 @@ def simple_input(title, prompt, default=""):
     win.wait_window()
 
     return val["value"]
+
 
 # ============================================================
 # RUN
