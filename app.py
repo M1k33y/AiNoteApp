@@ -29,6 +29,10 @@ class NotesApp:
         self.build_layout()
         self.load_topics()
 
+    def resize_chat_frame(self, event):
+        """Ensure chat_frame matches chat_container width."""
+        canvas_width = event.width
+        self.chat_container.itemconfig(self.chat_window, width=canvas_width)
 
     # ============================================================
     # BUILD LAYOUT
@@ -168,10 +172,15 @@ class NotesApp:
         self.chat_container.configure(yscrollcommand=self.chat_scroll.set)
 
         self.chat_frame = tk.Frame(self.chat_container, bg=self.colors["bg_card"])
-        self.chat_container.create_window((0, 0), window=self.chat_frame, anchor="nw")
+        self.chat_window = self.chat_container.create_window(
+        (0, 0),
+        window=self.chat_frame,
+        anchor="nw"
+        )
 
         self.chat_frame.bind("<Configure>", lambda e: 
                              self.chat_container.configure(scrollregion=self.chat_container.bbox("all")))
+        self.chat_container.bind("<Configure>", self.resize_chat_frame)
 
         # Input field + Send
         self.tutor_input = ttk.Entry(self.tutor_frame, width=80)
@@ -189,29 +198,27 @@ class NotesApp:
     # CHAT BUBBLE UTILITIES
     # ============================================================
     def add_bubble(self, text, sender="user"):
-    
+        """Create a chat bubble aligned left or right."""
 
-    # Outer frame that controls alignment
-        bubble_wrapper = tk.Frame(
-            self.chat_frame,
-            bg=self.colors["bg_card"]
-        )
+        # Each message gets its own ROW FRAME to avoid stretching.
+        row = tk.Frame(self.chat_frame, bg=self.colors["bg_card"])
+        row.pack(fill="x", pady=3)
 
-        # Bubble style
+        # Decide style based on sender
         if sender == "user":
             bubble_color = "#2e384d"
             fg = self.colors["accent"]
-            anchor_side = "e"        # align RIGHT
-            padx = (150, 10)         # more space on left, bubble sticks right
+            side = "right"
+            padx = (50, 10)
         else:
             bubble_color = "#374152"
             fg = "#A6E3A1"
-            anchor_side = "w"        # align LEFT
-            padx = (10, 150)         # more space on right, bubble sticks left
+            side = "left"
+            padx = (10, 50)
 
-        # The actual bubble
+        # bubble itself (shrink to text)
         bubble = tk.Frame(
-            bubble_wrapper,
+            row,
             bg=bubble_color,
             padx=12,
             pady=8
@@ -227,12 +234,13 @@ class NotesApp:
             font=("Segoe UI", 10)
         ).pack()
 
-        bubble.pack()
+        # PACK bubble aligned properly inside row
+        if side == "right":
+            bubble.pack(anchor="e", padx=padx)
+        else:
+            bubble.pack(anchor="w", padx=padx)
 
-        # IMPORTANT: pack with correct side alignment
-        bubble_wrapper.pack(anchor=anchor_side, pady=4, padx=padx)
-
-        # scroll to bottom
+        # update scroll
         self.chat_container.update_idletasks()
         self.chat_container.yview_moveto(1.0)
 
