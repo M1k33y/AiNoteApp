@@ -41,16 +41,16 @@ Ești un tutor AI care ajută utilizatorul să înțeleagă topicul: **{topic_na
 Descriere topic:
 {topic_desc}
 
-Titlurile notelor din acest topic:
+Titlurile notelor:
 {', '.join(note_titles)}
 
-Fragment notă selectată:
+Conținut extras:
 {selected_note_content}
 
 Instrucțiuni stil:
-- Răspunde în limba: {lang}
-- {depth_map.get(depth, "")}
-- Fii clar, logic și explicativ.
+- Toate răspunsurile tale trebuie să fie ÎNTOTDEAUNA în limba: {lang}.
+- Dacă întrebarea utilizatorului este în altă limbă, răspunde tot în {lang}.
+- Nivel detaliu: {depth_map.get(depth, "")}
 """
 
 
@@ -82,8 +82,16 @@ def ask_tutor(topic_id, topic_name, topic_desc, note_titles, selected_note_conte
     answer = response.choices[0].message.content
 
     # Save history
-    history[str(topic_id)].append({"role": "user", "content": question})
-    history[str(topic_id)].append({"role": "assistant", "content": answer})
+    
+    tid = str(topic_id)
+    if tid not in history:
+        history[tid] = []
+
+    history[tid].append({"role": "user", "content": question})
+    history[tid].append({"role": "assistant", "content": answer})
+    MAX_HISTORY = 10
+    if len(history[tid]) > MAX_HISTORY:
+        history[tid] = history[tid][-MAX_HISTORY:]
     save_chat_history(history)
 
     return answer

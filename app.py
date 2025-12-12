@@ -4,6 +4,7 @@ from theme import apply_modern_dark_theme
 from modern_widgets import RoundedButton
 from ai_tutor import ask_tutor
 from settings import load_settings
+from ai_tutor import load_chat_history
 from db import (
     get_topics, create_topic, update_topic, delete_topic,
     get_notes_by_topic, create_note, update_note, delete_note,
@@ -28,11 +29,102 @@ class NotesApp:
 
         self.build_layout()
         self.load_topics()
+        self.settings_window = None
+
+    def save_settings(self, lang_var, depth_var, temp_var, max_tokens_var, win):
+        from settings import save_settings
+
+        new_settings = {
+            "language": lang_var.get(),
+            "depth": depth_var.get(),
+            "temperature": float(temp_var.get()),
+            "max_tokens": int(max_tokens_var.get()),
+            "model": "gpt-4o-mini"
+        }
+
+        save_settings(new_settings)
+        win.destroy()
+        messagebox.showinfo("Settings", "Tutor settings saved!")
+
 
     def resize_chat_frame(self, event):
         """Ensure chat_frame matches chat_container width."""
         canvas_width = event.width
         self.chat_container.itemconfig(self.chat_window, width=canvas_width)
+
+    def load_chat_ui(self):
+        """Load saved conversation for the selected topic."""
+        # clear UI chat bubbles
+        for widget in self.chat_frame.winfo_children():
+            widget.destroy()
+
+        history = load_chat_history()
+        tid = str(self.selected_topic_id)
+
+        if tid not in history:
+            return  # no messages yet
+
+        for msg in history[tid]:
+            role = msg["role"]
+            content = msg["content"]
+
+            if role == "user":
+                self.add_bubble(f"👤 You:\n{content}", sender="user")
+            else:
+                self.add_bubble(f"🤖 Tutor:\n{content}", sender="assistant")
+
+        self.chat_container.update_idletasks()
+        self.chat_container.yview_moveto(1.0)
+
+    def on_mousewheel(self, event):
+        """Scroll chat on Windows & Mac."""
+        # event.delta > 0 means scroll up
+        self.chat_container.yview_scroll(int(-1*(event.delta/120)), "units")
+    
+    def open_settings_window(self):
+        if self.settings_window is not None and tk.Toplevel.winfo_exists(self.settings_window):
+            self.settings_window.lift()
+            return
+        
+        win = tk.Toplevel(self.root)
+        win.title("Tutor Settings")
+        win.geometry("400x400")
+        win.configure(bg=self.colors["bg_main"])
+        win.grab_set()
+
+        settings = load_settings()
+
+        # ---------------- Language ----------------
+        ttk.Label(win, text="Preferred Language:", foreground=self.colors["fg_text"]).pack(pady=5)
+        lang_var = tk.StringVar(value=settings.get("language", "RO"))
+        ttk.OptionMenu(win, lang_var, lang_var.get(), "RO", "EN").pack()
+
+        # ---------------- Answer Depth ----------------
+        ttk.Label(win, text="Answer Depth:", foreground=self.colors["fg_text"]).pack(pady=5)
+        depth_var = tk.StringVar(value=settings.get("depth", "medium"))
+        ttk.OptionMenu(win, depth_var, depth_var.get(), "short", "medium", "detailed").pack()
+
+        # ---------------- Temperature ----------------
+        ttk.Label(win, text="Temperature:", foreground=self.colors["fg_text"]).pack(pady=5)
+        temp_var = tk.DoubleVar(value=settings.get("temperature", 0.5))
+        ttk.Scale(win, from_=0.0, to=1.0, orient="horizontal", variable=temp_var).pack(fill="x", padx=40)
+
+        # ---------------- Max Tokens ----------------
+        ttk.Label(win, text="Max Tokens:", foreground=self.colors["fg_text"]).pack(pady=5)
+        max_tokens_var = tk.IntVar(value=settings.get("max_tokens", 300))
+        tk.Entry(win, textvariable=max_tokens_var, width=10).pack()
+
+        # ---------------- Save Button ----------------
+        RoundedButton(
+            win,
+            text="Save Settings",
+            bg_color="#A6E3A1",
+            fg_color="#1E1E2E",
+            parent_bg=self.colors["bg_main"],
+            command=lambda: self.save_settings(lang_var, depth_var, temp_var, max_tokens_var, win)
+        ).pack(pady=20)
+
+
 
     # ============================================================
     # BUILD LAYOUT
@@ -75,7 +167,13 @@ class NotesApp:
                       bg_color="#F38BA8", fg_color="#1E1E2E",
                       parent_bg=self.colors["bg_sidebar"],
                       command=self.delete_topic_action).pack(pady=5)
-
+        RoundedButton(
+            self.sidebar, text="Settings",
+            bg_color="#89B4FA",
+            fg_color="#1E1E2E",
+            parent_bg=self.colors["bg_sidebar"],
+            command=self.open_settings_window
+        ).pack(pady=20)
 
         # ------------------ NOTES PANEL ------------------
         self.main = ttk.Frame(self.root, style="Main.TFrame")
@@ -147,6 +245,7 @@ class NotesApp:
                       bg_color="#F38BA8", fg_color="#1E1E2E",
                       parent_bg=self.colors["bg_main"],
                       command=self.delete_note_action).grid(row=0, column=2, padx=5, sticky="ew")
+        
 
 
         # ============================================================
@@ -165,6 +264,8 @@ class NotesApp:
             highlightthickness=0
         )
         self.chat_container.pack(fill="both", expand=True, padx=5, pady=5)
+        self.chat_container.bind_all("<MouseWheel>", self.on_mousewheel)
+        self.chat_container.bind("<Enter>", lambda e: self.chat_container.focus_set())
 
         self.chat_scroll = ttk.Scrollbar(self.tutor_frame, orient="vertical", command=self.chat_container.yview)
         self.chat_scroll.pack(side="right", fill="y")
@@ -383,6 +484,7 @@ class NotesApp:
         idx = self.topic_list.curselection()[0]
         self.selected_topic_id = self.topics[idx]["id"]
         self.load_notes()
+        self.load_chat_ui()
 
     def load_notes(self):
         self.notes = list(get_notes_by_topic(self.selected_topic_id))
